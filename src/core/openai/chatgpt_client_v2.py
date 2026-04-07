@@ -25,35 +25,34 @@ from .sentinel_token_v2 import build_sentinel_token
 
 
 _CHROME_PROFILES = [
-    # chrome133a — 当前最稳定（curl_cffi 已长期支持）
-    {
-        "major": 133,
-        "impersonate": "chrome133a",
-        "build": 6943,
-        "patch_range": (33, 153),
-        "sec_ch_ua": '"Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"',
-    },
-    # chrome131 — 稳定备选
-    {
-        "major": 131,
-        "impersonate": "chrome131",
-        "build": 6778,
-        "patch_range": (69, 205),
-        "sec_ch_ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-    },
-    # chrome132 — 备用（136 有已知 impersonation 问题，暂移除）
-    {
-        "major": 132,
-        "impersonate": "chrome132",
-        "build": 7024,
-        "patch_range": (50, 180),
-        "sec_ch_ua": '"Not(A:Brand";v="99", "Google Chrome";v="132", "Chromium";v="132"',
-    },
+    # 实测可用：chrome100/101/107/110/119/131/133a 均能访问 chatgpt.com
+    # chrome120→403, chrome132/133→impersonation 不支持，chrome136→OpenAI 拒绝
+    {"major": 133, "impersonate": "chrome133a", "build": 6943,
+     "patch_range": (33, 153),
+     "sec_ch_ua": '"Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"'},
+    {"major": 131, "impersonate": "chrome131", "build": 6778,
+     "patch_range": (69, 205),
+     "sec_ch_ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"'},
+    {"major": 119, "impersonate": "chrome119", "build": 6099,
+     "patch_range": (80, 180),
+     "sec_ch_ua": '"Google Chrome";v="119", "Chromium";v="119", "Not_A Brand";v="99"'},
+    {"major": 110, "impersonate": "chrome110", "build": 5379,
+     "patch_range": (120, 180),
+     "sec_ch_ua": '"Google Chrome";v="110", "Chromium";v="110", "Not.A/Brand";v="99"'},
+    {"major": 107, "impersonate": "chrome107", "build": 5272,
+     "patch_range": (80, 140),
+     "sec_ch_ua": '"Google Chrome";v="107", "Chromium";v="107", "Not.A/Brand";v="99"'},
+    {"major": 101, "impersonate": "chrome101", "build": 5221,
+     "patch_range": (80, 140),
+     "sec_ch_ua": '"Google Chrome";v="101", "Chromium";v="101", "Not.A/Brand";v="99"'},
+    {"major": 100, "impersonate": "chrome100", "build": 5195,
+     "patch_range": (80, 140),
+     "sec_ch_ua": '"Google Chrome";v="100", "Chromium";v="100", "Not.A/Brand";v="99"'},
 ]
 
 
 def _random_chrome_version(retries: int = 3):
-    """随机选择一个 Chrome 版本，带 impersonation 失败重试。"""
+    """随机选择一个 Chrome 版本（基于实测可用列表）。"""
     import copy
     available = copy.deepcopy(_CHROME_PROFILES)
     last_error = None
@@ -66,15 +65,8 @@ def _random_chrome_version(retries: int = 3):
         patch = random.randint(*profile["patch_range"])
         full_ver = f"{major}.0.{build}.{patch}"
         ua = f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{full_ver} Safari/537.36"
-        try:
-            # 提前验证 impersonate 是否可用
-            test_session = curl_requests.Session(impersonate=profile["impersonate"])
-            del test_session
-            return profile["impersonate"], major, full_ver, ua, profile["sec_ch_ua"]
-        except Exception as e:
-            last_error = e
-            available.remove(profile)  # 仅在本地 copy 上操作，不影响全局列表
-    raise RuntimeError(f"所有 Chrome profile 重试{retries}次后仍失败: {last_error}") from last_error
+        return profile["impersonate"], major, full_ver, ua, profile["sec_ch_ua"]
+    raise RuntimeError(f"Chrome profile 重试{retries}次后仍失败: {last_error}") from last_error
 
 
 class ChatGPTClient:
@@ -94,15 +86,9 @@ class ChatGPTClient:
             "en,en-US;q=0.9",
             "en-US,en;q=0.8",
         ])
-        # 支持 impersonation 失败自动换 profile
         impersonate, self.chrome_major, self.chrome_full, self.ua, self.sec_ch_ua = _random_chrome_version()
         self.impersonate = impersonate
-        try:
-            self.session = curl_requests.Session(impersonate=self.impersonate)
-        except Exception as e:
-            # 极少数情况下 curl_cffi 加载后才发现不支持，回退到无 impersonate
-            self.session = curl_requests.Session()
-            self.impersonate = None
+        self.session = curl_requests.Session(impersonate=self.impersonate)
         if self.proxy:
             self.session.proxies = {"http": self.proxy, "https": self.proxy}
         self.session.headers.update(
